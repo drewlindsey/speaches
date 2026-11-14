@@ -1,12 +1,16 @@
 from collections.abc import Generator
 import logging
+import math
 from pathlib import Path
 from typing import TypedDict
+import zlib
 
+from fastapi import HTTPException
 import huggingface_hub
 import onnx_asr
 from onnx_asr.adapters import TextResultsAsrAdapter
-from onnx_asr.models import NemoConformerTdt
+from onnx_asr.asr import TimestampedResult
+from onnx_asr.models.nemo import NemoConformerTdt
 import openai.types.audio
 from opentelemetry import trace
 
@@ -32,6 +36,10 @@ from speaches.tracing import traced, traced_generator
 
 # LIBRARY_NAME = "onnx" # NOTE: library name is derived and not stored in the README
 TASK_NAME_TAG = "automatic-speech-recognition"
+# One encoder frame of a NeMo FastConformer (10 ms hop, 8x subsampling). onnx-asr reports when each token
+# starts but not how long it lasts, so the last word is given one frame.
+FRAME_SECONDS = 0.08
+SUPPORTED_RESPONSE_FORMATS = ("text", "json", "verbose_json")
 # TAGS = {"nemo-conformer-tdt"} # NOTE: I've tried to use this tag however it seems to be derived (likely from config.json) and isn't present when parsing the local model card
 
 logger = logging.getLogger(__name__)
@@ -98,7 +106,10 @@ class NemoConformerTdtModelRegistry(ModelRegistry[Model, NemoConformerTdtModelFi
         )
 
     def download_model_files(self, model_id: str) -> None:
-        allow_patterns = list(NemoConformerTdt._get_model_files(quantization=None).values())  # noqa: SLF001
+        model_files = list(NemoConformerTdt._get_model_files(quantization=None).values())  # noqa: SLF001
+        # an encoder over 2 GB keeps its weights in an external `<name>.onnx.data` file
+        data_files = [f"{file}?data" for file in model_files if file.endswith(".onnx")]
+        allow_patterns = [*model_files, *data_files]
 
         _model_repo_path_str = huggingface_hub.snapshot_download(
             repo_id=model_id, repo_type="model", allow_patterns=[*allow_patterns, "README.md"]
@@ -123,10 +134,8 @@ class ParakeetModelManager(BaseModelManager[TextResultsAsrAdapter]):
         request: TranscriptionRequest,
         **_kwargs,
     ) -> NonStreamingTranscriptionResponse:
-        if request.response_format not in ("text", "json"):
-            raise ValueError(
-                f"'{request.response_format}' response format is not supported for '{request.model}' model."
-            )
+        if request.response_format not in SUPPORTED_RESPONSE_FORMATS:
+            raise unsupported_response_format(request)
         with self.load_model(request.model) as parakeet:
             # TODO: issue warnings when client specifies unsupported parameters like `prompt`, `temperature`, `hotwords`, etc.
             # TODO: Use request.speech_segments for audio chunking
@@ -138,6 +147,16 @@ class ParakeetModelManager(BaseModelManager[TextResultsAsrAdapter]):
                     return results.text, "text/plain"
                 case "json":
                     return openai.types.audio.Transcription(text=results.text)
+                case "verbose_json":
+                    return result_to_verbose_transcription(
+                        results,
+                        duration=request.audio.duration,
+                        speech=speech_without_padding(request),
+                        language=request.language,
+                        word_timestamps="word" in request.timestamp_granularities,
+                    )
+                case _:
+                    raise unsupported_response_format(request)
 
     @traced_generator()
     def handle_streaming_transcription_request(
@@ -154,3 +173,106 @@ class ParakeetModelManager(BaseModelManager[TextResultsAsrAdapter]):
             return self.handle_streaming_transcription_request(request, **kwargs)
         else:
             return self.handle_non_streaming_transcription_request(request, **kwargs)
+
+
+def unsupported_response_format(request: TranscriptionRequest) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail=f"'{request.response_format}' response format is not supported for '{request.model}' model.",
+    )
+
+
+def speech_without_padding(request: TranscriptionRequest) -> list[tuple[float, float]]:
+    # VAD pads each speech segment on both sides; take the padding back off to find where speech stopped
+    rate = request.audio.sample_rate
+    pad = request.vad_options.speech_pad_ms / 1000
+    return [
+        (segment.start / rate + pad, max(segment.start / rate + pad, segment.end / rate - pad))
+        for segment in request.speech_segments
+    ]
+
+
+def speech_end_after(time: float, speech: list[tuple[float, float]]) -> float | None:
+    # the segment a token starts in, or failing that the nearest segment that began before it
+    started = [(start, end) for start, end in speech if start <= time]
+    if not started:
+        return None
+    _, end = started[-1]
+    return end if time <= end or time - end < FRAME_SECONDS else None
+
+
+def result_to_words(
+    result: TimestampedResult, duration: float, speech: list[tuple[float, float]] | None = None
+) -> list[openai.types.audio.TranscriptionWord]:
+    tokens = result.tokens or []
+    starts = result.timestamps or []
+    if len(starts) != len(tokens):
+        return []
+    # a token that starts with a space begins a new word; punctuation stays with the word before it
+    groups: list[list[int]] = []
+    for i, token in enumerate(tokens):
+        if token.startswith(" ") or not groups:
+            groups.append([i])
+        else:
+            groups[-1].append(i)
+    words: list[openai.types.audio.TranscriptionWord] = []
+    for n, group in enumerate(groups):
+        start = starts[group[0]]
+        # punctuation is stamped late, often inside the pause that follows the word
+        spoken = [i for i in group if any(c.isalnum() for c in tokens[i])] or group
+        last_token_start = starts[spoken[-1]]
+        end = last_token_start + FRAME_SECONDS if n + 1 == len(groups) else starts[groups[n + 1][0]]
+        # a word ends where the next one starts, unless speech stopped first (so a pause isn't counted as the word)
+        speech_end = speech_end_after(last_token_start, speech or [])
+        if speech_end is not None:
+            end = min(end, max(speech_end, last_token_start + FRAME_SECONDS))
+        end = min(end, duration)
+        word: dict[str, str | float] = {
+            "start": start,
+            "end": max(start, end),
+            "word": "".join(tokens[i] for i in group),
+        }
+        if result.logprobs is not None and len(result.logprobs) == len(tokens):
+            # the mean of the tokens' probabilities, as faster-whisper reports a word's `probability`
+            word["probability"] = sum(math.exp(result.logprobs[i]) for i in group) / len(group)
+        words.append(openai.types.audio.TranscriptionWord.model_validate(word))
+    return words
+
+
+def result_to_verbose_transcription(
+    result: TimestampedResult,
+    *,
+    duration: float,
+    speech: list[tuple[float, float]] | None = None,
+    language: str | None,
+    word_timestamps: bool,
+) -> openai.types.audio.TranscriptionVerbose:
+    text = result.text.strip()
+    words = result_to_words(result, duration, speech)
+    segments = []
+    if text:
+        logprobs = result.logprobs or []
+        segments.append(
+            openai.types.audio.TranscriptionSegment(
+                id=0,
+                seek=0,
+                start=words[0].start if words else 0.0,
+                end=words[-1].end if words else duration,
+                text=result.text,
+                # onnx-asr returns token strings, not ids
+                tokens=[],
+                temperature=0.0,
+                avg_logprob=sum(logprobs) / len(logprobs) if logprobs else 0.0,
+                compression_ratio=len(text.encode()) / len(zlib.compress(text.encode())),
+                # Parakeet has no no-speech head
+                no_speech_prob=0.0,
+            )
+        )
+    return openai.types.audio.TranscriptionVerbose(
+        # the model doesn't report a language; echo the request's
+        language=language or "",
+        duration=duration,
+        text=text,
+        segments=segments,
+        words=words if word_timestamps else None,
+    )
