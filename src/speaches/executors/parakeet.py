@@ -98,7 +98,11 @@ class NemoConformerTdtModelRegistry(ModelRegistry[Model, NemoConformerTdtModelFi
         )
 
     def download_model_files(self, model_id: str) -> None:
-        allow_patterns = list(NemoConformerTdt._get_model_files(quantization=None).values())  # noqa: SLF001
+        model_files = list(NemoConformerTdt._get_model_files(quantization=None).values())  # noqa: SLF001
+        # mirrors onnx-asr's own resolver: `config.json` is required by `get_model_files` and by the model loader,
+        # and an encoder over 2 GB keeps its weights in an external `<name>.onnx.data` file
+        data_files = [f"{file}?data" for file in model_files if file.endswith(".onnx")]
+        allow_patterns = ["config.json", *model_files, *data_files]
 
         _model_repo_path_str = huggingface_hub.snapshot_download(
             repo_id=model_id, repo_type="model", allow_patterns=[*allow_patterns, "README.md"]
