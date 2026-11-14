@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from speaches.api_types import Model
 from speaches.executors.shared.base_model_manager import BaseModelManager
+from speaches.executors.shared.errors import UnsupportedResponseFormatError
 from speaches.executors.shared.handler_protocol import (  # noqa: TC001
     NonStreamingTranscriptionResponse,
     StreamingTranscriptionEvent,
@@ -147,9 +148,7 @@ class WhisperModelManager(BaseModelManager[WhisperModel]):
         **_kwargs,
     ) -> NonStreamingTranscriptionResponse:
         if request.response_format == "diarized_json":
-            raise NotImplementedError(
-                f"'{request.response_format}' response format is not supported for '{request.model}' model."
-            )
+            raise UnsupportedResponseFormatError(request.response_format, request.model)
         timelog_start = time.perf_counter()
         with self.load_model(request.model) as whisper:
             whisper_model = BatchedInferencePipeline(model=whisper)
@@ -237,9 +236,7 @@ class WhisperModelManager(BaseModelManager[WhisperModel]):
         **_kwargs,
     ) -> TranslationResponse:
         if request.response_format == "diarized_json":
-            raise NotImplementedError(
-                f"'{request.response_format}' response format is not supported for '{request.model}' model."
-            )
+            raise UnsupportedResponseFormatError(request.response_format, request.model)
         with self.load_model(request.model) as whisper:
             whisper_model = BatchedInferencePipeline(model=whisper)
 
