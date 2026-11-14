@@ -1715,14 +1715,14 @@ wheels = [
 
 [[package]]
 name = "onnx-asr"
-version = "0.7.0"
+version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3d/27/5374180a246bab5fdc4de4ebeea12d8a29b89e1d3374a1945d37c155f1ac/onnx_asr-0.7.0.tar.gz", hash = "sha256:89646c1f88a4d8c09d6319af13dc6f2c3f85906d1083b027a90b23b4d3953142", size = 121582, upload-time = "2025-08-16T22:17:07.72Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4c/11/136f556cda02ecc172674dcea79232e9e84e74b951bbcd2e2722117f633b/onnx_asr-0.12.0.tar.gz", hash = "sha256:c1fcacddbced392f9f769ed5c6223f4ce739a6e4549346de33b9b520d4ead713", size = 45991, upload-time = "2026-07-15T00:09:58.852Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/09/9a/15531c21b54a2e05066443830917e7f77e5237e4ac8772b50d2d1115c25b/onnx_asr-0.7.0-py3-none-any.whl", hash = "sha256:a9cbbdc3529d373b54880c5e960c10e22ccc7d8acce724e596803b63b34a475d", size = 119078, upload-time = "2025-08-16T22:17:06.53Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/60/2fa469a2ee674c35ab48821a1039762ae7b9d0b88188ac1012e779477f76/onnx_asr-0.12.0-py3-none-any.whl", hash = "sha256:5e7ceca454609819ea7833f61e2302e0c8f6ece4f8a78b66c5daba53cb51de4a", size = 3980006, upload-time = "2026-07-15T00:09:57.322Z" },
 ]
 
 [[package]]
@@ -3240,7 +3240,7 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=0.33.4" },
     { name = "kokoro-onnx", extras = ["gpu"], specifier = ">=0.4.5,<0.5.0" },
     { name = "numpy", specifier = ">=2.3.1" },
-    { name = "onnx-asr", specifier = ">=0.7.0" },
+    { name = "onnx-asr", specifier = ">=0.12.0" },
     { name = "openai", extras = ["realtime"], specifier = ">=2.7.1" },
     { name = "opentelemetry-distro", specifier = ">=0.61b0" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.40.0" },
