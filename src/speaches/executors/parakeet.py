@@ -13,6 +13,7 @@ from opentelemetry import trace
 from speaches.api_types import Model
 from speaches.config import OrtOptions
 from speaches.executors.shared.base_model_manager import BaseModelManager, get_ort_providers_with_options
+from speaches.executors.shared.errors import UnsupportedResponseFormatError
 from speaches.executors.shared.handler_protocol import (
     NonStreamingTranscriptionResponse,
     StreamingTranscriptionEvent,
@@ -128,9 +129,7 @@ class ParakeetModelManager(BaseModelManager[TextResultsAsrAdapter]):
         **_kwargs,
     ) -> NonStreamingTranscriptionResponse:
         if request.response_format not in ("text", "json"):
-            raise ValueError(
-                f"'{request.response_format}' response format is not supported for '{request.model}' model."
-            )
+            raise UnsupportedResponseFormatError(request.response_format, request.model)
         with self.load_model(request.model) as parakeet:
             # TODO: issue warnings when client specifies unsupported parameters like `prompt`, `temperature`, `hotwords`, etc.
             # TODO: Use request.speech_segments for audio chunking
