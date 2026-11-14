@@ -19,6 +19,7 @@ from speaches.executors.shared.handler_protocol import (
     StreamingTranscriptionEvent,
     TranscriptionRequest,
 )
+from speaches.executors.silero_vad_v5 import MergedSegment, merge_segments
 from speaches.hf_utils import (
     HfModelFilter,
     extract_language_list,
@@ -132,10 +133,13 @@ class ParakeetModelManager(BaseModelManager[TextResultsAsrAdapter]):
             raise UnsupportedResponseFormatError(request.response_format, request.model)
         with self.load_model(request.model) as parakeet:
             # TODO: issue warnings when client specifies unsupported parameters like `prompt`, `temperature`, `hotwords`, etc.
-            # TODO: Use request.speech_segments for audio chunking
 
             # plain `recognize`: since onnx-asr 0.12 `with_timestamps()` also computes per-token log-probabilities
-            text = parakeet.recognize(request.audio.data)
+            text = " ".join(
+                window_text
+                for window in speech_windows(request)
+                if (window_text := parakeet.recognize(request.audio.data[window["start"] : window["end"]]))
+            )
 
             match request.response_format:
                 case "text":
@@ -158,3 +162,10 @@ class ParakeetModelManager(BaseModelManager[TextResultsAsrAdapter]):
             return self.handle_streaming_transcription_request(request, **kwargs)
         else:
             return self.handle_non_streaming_transcription_request(request, **kwargs)
+
+
+def speech_windows(request: TranscriptionRequest) -> list[MergedSegment]:
+    # VAD speech segments merged into windows of up to `max_speech_duration_s`, as whisper is given through
+    # `clip_timestamps`. A window rather than a single segment keeps the context the model needs for punctuation.
+    # `merge_segments` modifies the segments it is given, so it gets copies.
+    return merge_segments([segment.model_copy() for segment in request.speech_segments], request.vad_options)
