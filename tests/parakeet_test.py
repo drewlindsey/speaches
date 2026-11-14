@@ -7,6 +7,7 @@ from pytest_mock import MockerFixture
 from speaches.audio import Audio
 from speaches.config import OrtOptions
 from speaches.executors.parakeet import ParakeetModelManager
+from speaches.executors.shared.errors import UnsupportedResponseFormatError
 from speaches.executors.shared.handler_protocol import TranscriptionRequest
 from speaches.executors.silero_vad_v5 import SpeechTimestamp, VadOptions
 
@@ -40,3 +41,13 @@ def test_text_and_json_skip_timestamps_and_logprobs(parakeet: MagicMock, respons
 
     parakeet.with_timestamps.assert_not_called()
     parakeet.recognize.assert_called_once()
+
+
+@pytest.mark.parametrize("response_format", ["srt", "vtt", "diarized_json"])
+def test_an_unsupported_format_is_rejected_before_the_model_loads(parakeet: MagicMock, response_format: str) -> None:
+    manager = ParakeetModelManager(ttl=-1, ort_opts=OrtOptions())
+
+    with pytest.raises(UnsupportedResponseFormatError):
+        manager.handle_non_streaming_transcription_request(transcription_request(response_format))
+
+    parakeet.recognize.assert_not_called()

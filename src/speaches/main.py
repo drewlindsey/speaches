@@ -22,6 +22,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import RedirectResponse
 
 from speaches.dependencies import ApiKeyDependency, get_config, get_executor_registry
+from speaches.executors.shared.errors import UnsupportedResponseFormatError
 from speaches.logger import setup_logger
 from speaches.routers.chat import (
     router as chat_router,
@@ -148,6 +149,13 @@ def create_app() -> FastAPI:
         if log_level == "DEBUG" and exc.debug:
             content["debug"] = exc.debug
         return JSONResponse(status_code=exc.status_code, content=content)
+
+    @app.exception_handler(UnsupportedResponseFormatError)
+    async def _unsupported_response_format_error_handler(
+        _request: Request, exc: UnsupportedResponseFormatError
+    ) -> JSONResponse:
+        logger.warning(str(exc))
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
 
     @app.exception_handler(StarletteHTTPException)
     async def _custom_http_exception_handler(request: Request, exc: HTTPException) -> Response:
