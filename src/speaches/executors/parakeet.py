@@ -6,7 +6,7 @@ from typing import TypedDict
 import huggingface_hub
 import onnx_asr
 from onnx_asr.adapters import TextResultsAsrAdapter
-from onnx_asr.models import NemoConformerTdt
+from onnx_asr.models.nemo import NemoConformerTdt
 import openai.types.audio
 from opentelemetry import trace
 
@@ -135,13 +135,14 @@ class ParakeetModelManager(BaseModelManager[TextResultsAsrAdapter]):
             # TODO: issue warnings when client specifies unsupported parameters like `prompt`, `temperature`, `hotwords`, etc.
             # TODO: Use request.speech_segments for audio chunking
 
-            results = parakeet.with_timestamps().recognize(request.audio.data)
+            # plain `recognize`: since onnx-asr 0.12 `with_timestamps()` also computes per-token log-probabilities
+            text = parakeet.recognize(request.audio.data)
 
             match request.response_format:
                 case "text":
-                    return results.text, "text/plain"
+                    return text, "text/plain"
                 case "json":
-                    return openai.types.audio.Transcription(text=results.text)
+                    return openai.types.audio.Transcription(text=text)
 
     @traced_generator()
     def handle_streaming_transcription_request(
