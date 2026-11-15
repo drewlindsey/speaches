@@ -13,7 +13,6 @@ from fastapi import (
     status,
 )
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from faster_whisper.audio import decode_audio
 from httpx import ASGITransport, AsyncClient
 import numpy as np
 from numpy import float32
@@ -21,7 +20,7 @@ from openai import AsyncOpenAI
 from openai.resources.audio import AsyncSpeech, AsyncTranscriptions
 from openai.resources.chat.completions import AsyncCompletions
 
-from speaches.audio import Audio
+from speaches.audio import Audio, decode_audio
 from speaches.config import Config
 from speaches.executors.shared.registry import ExecutorRegistry
 
@@ -97,7 +96,7 @@ def audio_file_dependency(
             audio_int16 = np.frombuffer(raw_bytes, dtype=np.int16)
             audio_data = cast("np.typing.NDArray[float32]", audio_int16.astype(np.float32) / 32768.0)
         else:
-            audio_data = cast("np.typing.NDArray[float32]", decode_audio(file.file, sampling_rate=16000))
+            audio_data = decode_audio(file.file, sampling_rate=16000)
         elapsed = time.perf_counter() - start
         audio = Audio(audio_data, sample_rate=16000, name=Path(file.filename).stem if file.filename else None)
         logger.debug(f"Decoded {audio.duration}s of audio in {elapsed:.5f}s (RTF: {elapsed / audio.duration})")

@@ -1,5 +1,5 @@
 import base64
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 import io
 import logging
 import queue as queue_module
@@ -7,10 +7,57 @@ import subprocess
 import threading
 from typing import BinaryIO, Literal, Self, cast
 
+import av
+import av.audio.frame
+import av.container
 import numpy as np
 import soundfile as sf
 
 logger = logging.getLogger(__name__)
+
+
+def decode_audio(file: BinaryIO, sampling_rate: int = 16000) -> np.typing.NDArray[np.float32]:
+    """Decode any audio PyAV can read to mono float32 samples at `sampling_rate`.
+
+    The same samples as faster-whisper's `decode_audio`, without its full `gc.collect()` after every file
+    (https://github.com/SYSTRAN/faster-whisper/issues/390). A full collection costs time in proportion to
+    every live object in the process, so in this server it took longer than the decoding itself: about
+    70 ms per request, and twice that with torch loaded. With PyAV 15, decoding without it keeps memory flat.
+    """
+    resampler = av.AudioResampler(format="s16", layout="mono", rate=sampling_rate)
+    chunks: list[np.typing.NDArray[np.int16]] = []
+    with av.open(file, mode="r", metadata_errors="ignore") as container:
+        assert isinstance(container, av.container.InputContainer)
+        # frames go through the resampler in large groups, as in faster-whisper, so the samples match exactly
+        for group in _grouped(_decoded_audio_frames(container), 500_000):
+            chunks.extend(cast("np.typing.NDArray[np.int16]", f.to_ndarray()) for f in resampler.resample(group))
+        chunks.extend(cast("np.typing.NDArray[np.int16]", f.to_ndarray()) for f in resampler.resample(None))
+    if not chunks:
+        return np.zeros(0, dtype=np.float32)
+    return np.concatenate(chunks, axis=None).astype(np.float32) / 32768.0
+
+
+def _decoded_audio_frames(container: av.container.InputContainer) -> Iterator[av.audio.frame.AudioFrame]:
+    # skips frames that fail to decode, as faster-whisper does
+    frames = container.decode(audio=0)
+    while True:
+        try:
+            yield next(frames)
+        except StopIteration:
+            return
+        except av.error.InvalidDataError:
+            continue
+
+
+def _grouped(frames: Iterator[av.audio.frame.AudioFrame], samples: int) -> Iterator[av.audio.frame.AudioFrame]:
+    fifo = av.AudioFifo()
+    for frame in frames:
+        frame.pts = None  # the FIFO would otherwise reject gaps in the timestamps
+        fifo.write(frame)
+        if fifo.samples >= samples:
+            yield cast("av.audio.frame.AudioFrame", fifo.read())
+    if fifo.samples > 0:
+        yield cast("av.audio.frame.AudioFrame", fifo.read())
 
 
 # NOTE: `signal.resample_poly` **might** be a better option for resampling audio data
