@@ -5,10 +5,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, cast
 from fastapi import APIRouter, Form, Response
 from fastapi.responses import JSONResponse
 import numpy as np
-from pyannote.audio.core.pipeline import Pipeline
-from pyannote.audio.pipelines.speaker_diarization import DiarizeOutput
 from pydantic import BaseModel
-import torch
 
 from speaches.audio import Audio
 from speaches.dependencies import AudioFileDependency, ExecutorRegistryDependency
@@ -18,8 +15,12 @@ from speaches.routers.utils import find_executor_for_model_or_raise, get_model_c
 from speaches.utils import parse_data_url_to_audio
 
 if TYPE_CHECKING:
+    # pyannote and torch are imported where they're used, so that loading the app doesn't import them
+    from pyannote.audio.core.pipeline import Pipeline
+    from pyannote.audio.pipelines.speaker_diarization import DiarizeOutput
     from pyannote.core.segment import Segment
     from pyannote.core.utils.types import TrackName
+    import torch
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,13 +43,14 @@ class DiarizationResponse(BaseModel):
 
 
 def _map_to_known_speakers(
-    pipeline: Pipeline,
-    waveform: torch.Tensor,
+    pipeline: "Pipeline",
+    waveform: "torch.Tensor",
     sample_rate: int,
-    diarization: DiarizeOutput,
+    diarization: "DiarizeOutput",
     known_speakers: list[KnownSpeaker],
 ) -> dict[Hashable, str]:
     from pyannote.audio import Inference
+    import torch
 
     inference = Inference(pipeline._embedding, window="whole")  # noqa: SLF001
     main_audio = {"waveform": waveform, "sample_rate": sample_rate}
@@ -113,6 +115,9 @@ def diarize_audio(
     known_speaker_references: Annotated[list[str] | None, Form(alias="known_speaker_references[]")] = None,
     response_format: Annotated[Literal["json", "rttm"] | None, Form()] = "json",
 ) -> Response:
+    from pyannote.audio.pipelines.speaker_diarization import DiarizeOutput
+    import torch
+
     known_speakers: list[KnownSpeaker] | None = None
     if known_speaker_names and known_speaker_references:
         known_speakers = [
