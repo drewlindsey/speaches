@@ -21,14 +21,9 @@ env:
   PYANNOTE_METRICS_ENABLED: 0
 jobs:
   pytest:
-    strategy:
-      fail-fast: false # Continue running jobs even if one fails
-      matrix:
-        # https://docs.github.com/en/actions/concepts/runners/about-larger-runners#about-macos-larger-runners
-        # NOTE: macos-15-large was failing with the following error:
-        #  hint: You're on macOS (`macosx_15_0_x86_64`), but `ctranslate2` (v4.5.0) only has wheels for the following platforms: `manylinux_2_17_aarch64`, `manylinux_2_17_x86_64`, `manylinux2014_aarch64`, `manylinux2014_x86_64`, `macosx_11_0_arm64`, `win_amd64`; consider adding your platform to `tool.uv.required-environments` to ensure uv resolves to a version with compatible wheels
-        os: [ubuntu-24.04-4core-x86, ubuntu-24.04-4core-arm64, macos-15-xlarge]
-    runs-on: ${{ matrix.os }}
+    # Fork: upstream runs a matrix of larger runners (ubuntu-24.04-4core-x86/-arm64, macos-15-xlarge) that a personal
+    # account doesn't get, so the jobs never start. This fork deploys linux/amd64 only.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - if: runner.os == 'Linux'
@@ -43,8 +38,10 @@ jobs:
           activate-environment: true
       - run: uv python install
       - run: uv sync
-      - run: uv run pytest -m "not requires_openai" tests/
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN_W_PYANNOTE_GATED_MODEL_ACCESS }}
-          CHAT_COMPLETION_BASE_URL: https://api.openai.com/v1
-          CHAT_COMPLETION_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Fork: there's no OpenAI key or gated Hugging Face token here. The two realtime conversation tests aren't marked
+      # `requires_openai` but create a response through the chat-completion endpoint, so they're deselected by name.
+      - run: >-
+          uv run pytest tests/
+          -m "not requires_openai and not requires_gated_hf_model"
+          --deselect "tests/realtime/realtime_conversation_test.py::test_realtime_conversation_item_create_with_previous_item_id"
+          --deselect "tests/realtime/realtime_conversation_test.py::test_realtime_conversation_item_create_with_previous_item_id_root"
