@@ -1,0 +1,87 @@
+# Fork-only: builds the CPU image this fork deploys and pushes it to this repository's own
+# GHCR package. Upstream's docker-build-and-push.yaml pushes to ghcr.io/speaches-ai and needs
+# larger runners, so it can't run here. Don't cherry-pick this file upstream.
+name: fork-image
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "model_aliases.json"
+      - "src/**"
+      - ".github/workflows/fork-image.yaml"
+  workflow_dispatch:
+concurrency:
+  group: fork-image-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+  packages: write
+env:
+  # GHCR names must be lowercase
+  IMAGE: ghcr.io/drewlindsey/speaches
+  # pull requests only check that the image builds; pushes to master publish it
+  PUSH: ${{ github.event_name != 'pull_request' }}
+jobs:
+  cpu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      # the image carries torch and the CUDA wheels onnxruntime-gpu needs, which don't fit in a
+      # standard runner's free disk alongside its preinstalled toolchains
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force
+          df -h /
+      - uses: actions/checkout@v5
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
+            suffix=-cpu
+          # sha-<commit>-cpu for pinning; master-cpu follows the branch
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=ref,event=pr
+      - if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          build-args: |
+            BASE_IMAGE=ubuntu:24.04
+          platforms: linux/amd64
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          # replaces the Dockerfile's upstream `source` label, so GHCR links the package to this fork
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Summary
+        run: |
+          {
+            echo "### ${{ env.PUSH == 'true' && 'Pushed' || 'Built (not pushed)' }}"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo
+            echo "Digest: \`${{ steps.build.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
