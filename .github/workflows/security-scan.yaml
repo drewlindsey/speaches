@@ -1,0 +1,57 @@
+# Fork-only, like fork-image.yaml: don't cherry-pick this file upstream. Every Monday and by hand,
+# Trivy over the CPU image this fork publishes (ghcr.io/drewlindsey/speaches:master-cpu) and
+# uv.lock, at HIGH and CRITICAL with a fix upstream (`--ignore-unfixed`: a finding with no fix is
+# nothing a change here can act on, and an issue that never closes gets ignored). The result is ONE
+# open issue on this fork labelled `security-scan`: opened, rewritten with a comment when the
+# findings change, closed by the first clean run. The logic is in scripts/security_scan.py, so a
+# run by hand (`--dry-run`) is the same scan; .github/security-scan.md has the details.
+#
+# Every `uses:` is pinned to a full commit SHA with the release in a trailing comment: a version
+# tag is mutable. Trivy itself is pinned by image digest in the script.
+name: security-scan
+on:
+  # 13:17 UTC is 07:17 Central in winter, 08:17 under daylight saving (GitHub's cron is UTC only).
+  schedule:
+    - cron: "17 13 * * 1"
+  workflow_dispatch:
+# a dispatch during the scheduled run waits rather than cancelling it, whose issue update would be lost
+concurrency:
+  group: security-scan
+  cancel-in-progress: false
+# the image is public, so no `packages: read`
+permissions:
+  contents: read
+  issues: write
+jobs:
+  scan:
+    # never upstream's issues, even if this file were copied there
+    if: github.repository == 'drewlindsey/speaches'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # the image is read straight from GHCR (`--image-src remote`), so it never lands on the
+      # runner's disk; a target that fails is a scan error in the issue, and the other is still scanned
+      - name: Scan, then update the security-scan issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/security_scan.py
+      # only when the script itself broke (a crash, or gh failing), so that is not silent either
+      - name: Report a scan that didn't finish
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create security-scan --color B60205 --description "Findings from the weekly security scan" 2>/dev/null || true
+          msg="The weekly security scan didn't finish on $(date -u +%F), so this week's results are missing. Run: $RUN_URL"
+          open=$(gh issue list --label security-scan --state open --json number --jq 'map(.number) | min // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "$msg"
+          else
+            gh issue create --label security-scan --title "Security scan: the scan didn't finish" --body "$msg"
+          fi
