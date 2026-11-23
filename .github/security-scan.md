@@ -9,9 +9,8 @@ upstream, and the job only runs in `drewlindsey/speaches`.
 ## What it scans
 
 - **The image this fork publishes:** `ghcr.io/drewlindsey/speaches:master-cpu`, which
-  `fork-image.yaml` pushes from every merge to `master` (homelab's `services/speaches` pins a
-  digest of it). Trivy reads it straight from GHCR as `linux/amd64`, so it never lands on the
-  runner's disk.
+  `fork-image.yaml` pushes from every merge to `master`. Trivy reads it straight from GHCR as
+  `linux/amd64`, so it never lands on the runner's disk.
 - **`uv.lock`:** the lock the image installs from (`uv sync --frozen --no-dev`).
 
 It reports HIGH and CRITICAL findings that have a fix upstream (`--ignore-unfixed`): a finding

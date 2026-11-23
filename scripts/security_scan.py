@@ -13,8 +13,7 @@
 # version is the same on a Mac and in CI. Issue mode also needs gh with issues: write on REPO, and
 # it only ever talks to REPO, never to upstream.
 #
-# The same script runs in homelab, chloe-voice and this fork. Only the settings block below
-# differs between them.
+# Only the settings block below is specific to this repository.
 from __future__ import annotations
 
 import argparse
@@ -38,7 +37,7 @@ DOC = ".github/security-scan.md"
 SCAN_COMPOSE = False
 # Off here: the Dockerfile's base is a build arg, and the image it builds is scanned below.
 SCAN_FROM_LINES = False
-# The CPU image fork-image.yaml publishes from master (homelab's services/speaches pins a digest of it).
+# The CPU image fork-image.yaml publishes from master.
 EXTRA_IMAGES: list[tuple[str, str]] = [
     ("ghcr.io/drewlindsey/speaches:master-cpu", ".github/workflows/fork-image.yaml"),
 ]
@@ -65,7 +64,7 @@ LOCKFILE = re.compile(
 SKIP = re.compile(r"(^|/)(node_modules|tests?/fixtures)/")
 # Trivy reads pip requirements only from files named requirements.txt; this adds the .lock names.
 PIP_FILES = r"pip:requirements[^/]*\.(txt|lock)$"
-# A CUDA image is several GB: minutes on a runner, but most of an hour over a home connection.
+# A CUDA image is several GB: minutes on a runner, but most of an hour over a slow connection.
 TRIVY_TIMEOUT = "90m"
 STEP_TIMEOUT = 95 * 60  # seconds, for one build or one scan
 BODY_LIMIT = 60_000  # GitHub's issue body limit is 65,536 characters
