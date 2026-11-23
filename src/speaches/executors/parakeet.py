@@ -232,6 +232,9 @@ def words_by_region(words: list[WordStart], regions: list[tuple[float, float]], 
 def with_word_ends(words: list[WordStart], region_end: float) -> list[Word]:
     # a word ends where the next one starts and the last one where its speech region ends,
     # so the pause after a region isn't counted as part of its last word
+    if not words:
+        # a speech region the model heard no words in (a cough, a short noise between words)
+        return []
     ends = [next_start for next_start, _ in words[1:]] + [region_end]
     return [
         Word(start, max(start, min(end, region_end)), tokens) for (start, tokens), end in zip(words, ends, strict=True)

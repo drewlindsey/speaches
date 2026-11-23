@@ -179,6 +179,32 @@ def test_a_word_before_a_pause_ends_with_its_speech_region_not_at_the_next_word(
     ]
 
 
+@pytest.mark.parametrize(
+    ("regions", "timestamps", "segments"),
+    [
+        # the first region has no words: the model heard both in the second
+        ([(0.0, 0.5), (0.5, 1.6)], [0.6, 0.8], [" Hey there"]),
+        # a region between two with words
+        ([(0.0, 0.5), (0.5, 1.0), (1.0, 1.6)], [0.0, 1.2], [" Hey", " there"]),
+        # the last region has no words
+        ([(0.0, 1.0), (1.0, 1.6)], [0.0, 0.2], [" Hey there"]),
+    ],
+)
+def test_a_speech_region_with_no_words_in_it_is_left_out(
+    regions: list[tuple[float, float]], timestamps: list[float], segments: list[str]
+) -> None:
+    result = TimestampedResult(
+        text="Hey there", tokens=[" Hey", " there"], timestamps=timestamps, logprobs=[-0.1, -0.2]
+    )
+
+    transcription = verbose([one_window(0.0, 1.6, regions)], [result], duration=1.6)
+
+    assert transcription.words is not None
+    assert [w.word for w in transcription.words] == [" Hey", " there"]
+    assert transcription.segments is not None
+    assert [s.text for s in transcription.segments] == segments
+
+
 def test_each_speech_region_is_a_segment_with_times_offset_by_its_window() -> None:
     second = TimestampedResult(text="Bye.", tokens=[" Bye", "."], timestamps=[0.4, 0.56], logprobs=[-0.1, -0.3])
     windows = [one_window(0.0, 2.15, [(0.0, 1.0), (1.0, 2.15)]), one_window(40.0, 41.0)]
